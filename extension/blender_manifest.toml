@@ -1,8 +1,8 @@
 schema_version = "1.0.0"
 
-id = "psd_layers_reader"
+id = "camap"
 version = "1.0.0"
-name = "PSD Layers Reader"
+name = "Camap"
 tagline = "Import PSD layers"
 maintainer = "Lucas Boutrot <lucas.boutrot@gmail.com>"
 

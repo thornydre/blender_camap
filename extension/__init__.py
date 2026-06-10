@@ -8,6 +8,7 @@ from bpy.props import StringProperty, BoolProperty, EnumProperty, IntProperty, C
 from mathutils import Vector
 import math
 from pathlib import Path
+from PIL import Image
 
 
 def camera_object_poll(self, object):
@@ -19,10 +20,10 @@ def create_planes_poll(context):
 	# if ext != ".psd":
 	# 	return False
 
-	if context.scene.psd_camera is None:
+	if context.scene.camap_camera is None:
 		return False
 
-	if context.scene.psd_camera.type != "CAMERA":
+	if context.scene.camap_camera.type != "CAMERA":
 		return False
 
 	return True
@@ -46,8 +47,10 @@ def load_new_camap_file(self, context):
 	# Change name in the image list
 	selected_image_path_str = scene.camap_files[scene.camap_file_index].image_path
 	if not selected_image_path_str:
-		scene.camap_files[scene.camap_file_index].file_name = " New File"
+		scene.camap_files[scene.camap_file_index].file_name = "New File"
 		return
+
+	remove_file_layers(scene.camap_file_index)
 
 	selected_image_path = Path(selected_image_path_str)
 	scene.camap_files[scene.camap_file_index].file_name = selected_image_path.stem
@@ -56,7 +59,7 @@ def load_new_camap_file(self, context):
 		# Add layers in layers list
 		psd = psd_tools.PSDImage.open(selected_image_path)
 
-		scene.psd_layer_count = len([layer for layer in psd.descendants() if layer.kind == "pixel"])
+		scene.camap_layer_count = len([layer for layer in psd.descendants() if layer.kind == "pixel"])
 
 		i = 0
 		for layer_id, layer in enumerate(psd.descendants()):
@@ -65,20 +68,43 @@ def load_new_camap_file(self, context):
 				item.layer_name = layer.name
 				item.file_id = scene.camap_file_index
 				item.layer_id = len(scene.camap_layers) + layer_id
+				item.psd_layer_id = layer_id
 				item.layer_object = None
-				item.layer_distance = 1 - (i / (scene.psd_layer_count - 1))
+				item.layer_distance = 1 - (i / (scene.camap_layer_count - 1))
 				item.layer_visibility = True
 
 				i += 1
 
-	if selected_image_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+	elif selected_image_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
 		item = scene.camap_layers.add()
 		item.layer_name = selected_image_path.stem
 		item.file_id = scene.camap_file_index
 		item.layer_id = len(scene.camap_layers)
+		item.psd_layer_id = -1
 		item.layer_object = None
 		item.layer_distance = 0.5
 		item.layer_visibility = True
+
+
+def remove_file_layers(file_id):
+	scene = bpy.context.scene
+	remove_ids_list = []
+	for i, layer in enumerate(scene.camap_layers):
+		if layer.file_id == file_id:
+			remove_ids_list.append(i)
+
+	for layer_id in sorted(remove_ids_list, reverse=True):
+		scene.camap_layers.remove(layer_id)
+
+
+def get_layer_items_from_file(file_id):
+	scene = bpy.context.scene
+	layers_list = []
+	for layer_item in scene.camap_layers:
+		if layer_item.file_id == file_id:
+			layers_list.append(layer_item)
+
+	return layers_list
 
 
 def apply_modifier(target_object, modifier):
@@ -165,9 +191,9 @@ def create_adaptive_depth_modifier(link_to_object, scene, layer_id):
 			modifier = link_to_object.modifiers.new(name="AdaptiveDepth", type="NODES")
 			modifier.node_group = bpy.data.node_groups["AdaptiveDepth"]
 
-			modifier["Socket_3"] = scene.psd_camera
+			modifier.properties.inputs.Socket_3.value = scene.camap_camera
 
-			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"]["Socket_6"]').driver
+			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"].properties.inputs.Socket_6.value').driver
 			driver.type = "AVERAGE"
 
 			if driver.variables.get("layer_distance") is None:
@@ -177,7 +203,7 @@ def create_adaptive_depth_modifier(link_to_object, scene, layer_id):
 				var.targets[0].id = scene
 				var.targets[0].data_path = f"camap_layers[{layer_id}].layer_distance"
 
-			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"]["Socket_10"]', 0).driver
+			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"].properties.inputs.Socket_10.value', 0).driver
 			driver.type = "AVERAGE"
 
 			if driver.variables.get("cam_distance_min") is None:
@@ -185,9 +211,9 @@ def create_adaptive_depth_modifier(link_to_object, scene, layer_id):
 				var.name = "cam_distance_min"
 				var.targets[0].id_type = "SCENE"
 				var.targets[0].id = scene
-				var.targets[0].data_path = f"psd_cam_distance_min"
+				var.targets[0].data_path = f"camap_cam_distance_min"
 
-			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"]["Socket_10"]', 1).driver
+			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"].properties.inputs.Socket_10.value', 1).driver
 			driver.type = "AVERAGE"
 
 			if driver.variables.get("cam_distance_max") is None:
@@ -195,9 +221,9 @@ def create_adaptive_depth_modifier(link_to_object, scene, layer_id):
 				var.name = "cam_distance_max"
 				var.targets[0].id_type = "SCENE"
 				var.targets[0].id = scene
-				var.targets[0].data_path = f"psd_cam_distance_max"
+				var.targets[0].data_path = f"camap_cam_distance_max"
 
-			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"]["Socket_2"]').driver
+			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"].properties.inputs.Socket_2.value').driver
 			driver.type = "AVERAGE"
 
 			if driver.variables.get("floor_offset") is None:
@@ -207,7 +233,7 @@ def create_adaptive_depth_modifier(link_to_object, scene, layer_id):
 				var.targets[0].id = scene
 				var.targets[0].data_path = f"camap_layers[{layer_id}].floor_offset"
 
-			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"]["Socket_5"]').driver
+			driver = link_to_object.driver_add('modifiers["AdaptiveDepth"].properties.inputs.Socket_5.value').driver
 			driver.type = "AVERAGE"
 
 			if driver.variables.get("floor") is None:
@@ -231,16 +257,20 @@ def create_camera_projection_modifier(link_to_object, scene, image_file, layer):
 			modifier = link_to_object.modifiers.new(name="CameraProjection", type="NODES")
 			modifier.node_group = bpy.data.node_groups["CameraProjection"]
 
-			modifier["Socket_2"] = scene.psd_camera
+			modifier.properties.inputs.Socket_2.value = scene.camap_camera
 
-			modifier["Socket_3"][0] = layer.offset[0] / image_file.size[0] * -1
-			modifier["Socket_3"][1] = -1 + layer.size[1] / image_file.size[1] + layer.offset[1] / image_file.size[1]
-			modifier["Socket_4"][0] = image_file.size[0] / layer.size[0]
-			modifier["Socket_4"][1] = image_file.size[1] / layer.size[1]
+			layer_missing = layer is not None
+			image_file_missing = image_file is not None
+
+			if layer_missing or image_file_missing:
+				modifier.properties.inputs.Socket_3.value[0] = layer.offset[0] / image_file.size[0] * -1
+				modifier.properties.inputs.Socket_3.value[1] = -1 + layer.size[1] / image_file.size[1] + layer.offset[1] / image_file.size[1]
+				modifier.properties.inputs.Socket_4.value[0] = image_file.size[0] / layer.size[0]
+				modifier.properties.inputs.Socket_4.value[1] = image_file.size[1] / layer.size[1]
 
 
-def create_material(link_to_object, camera_obj, layer, image_texture):
-	material_name = f"material_{layer.name}"
+def create_material(link_to_object, camera_obj, layer_name, layer_opacity, image_texture):
+	material_name = f"material_{layer_name}"
 
 	material = bpy.data.materials.get(material_name)
 
@@ -265,7 +295,7 @@ def create_material(link_to_object, camera_obj, layer, image_texture):
 		opacity_node.location = (-200, 440)
 		opacity_node.label = "Opacity"
 		opacity_node.operation = "MULTIPLY"
-		opacity_node.inputs[1].default_value = layer.opacity / 255
+		opacity_node.inputs[1].default_value = layer_opacity
 		mix_node.location = (40, 300)
 		out_node.location = (220, 300)
 
@@ -287,7 +317,7 @@ def create_material(link_to_object, camera_obj, layer, image_texture):
 		link_to_object.data.materials.append(material)
 
 
-def load_layer(scene, image_file, layer, layer_id, index):
+def load_psd_layer(scene, image_file, layer, layer_id, index):
 	array = layer.numpy()
 
 	if np.shape(array)[2] == 3:
@@ -326,12 +356,18 @@ def load_layer(scene, image_file, layer, layer_id, index):
 		(layer.offset[1] + layer.size[1]) / image_file.size[1]
 	]
 
-	plane_obj = create_plane(name=layer.name, bbox=bbox, camera=scene.psd_camera, distance=(scene.psd_layer_count - index) * 2)
+	plane_obj = create_plane(name=layer.name, bbox=bbox, camera=scene.camap_camera, distance=(scene.camap_layer_count - index) * 2)
 
 	create_adaptive_depth_modifier(link_to_object=plane_obj, scene=scene, layer_id=layer_id)
 	create_camera_projection_modifier(link_to_object=plane_obj, scene=scene, image_file=image_file, layer=layer)
 
-	create_material(link_to_object=plane_obj, camera_obj=scene.psd_camera, layer=layer, image_texture=image_texture)
+	create_material(
+		link_to_object=plane_obj,
+		camera_obj=scene.camap_camera,
+		layer_name=layer.name,
+		layer_opacity=layer.opacity / 255,
+		image_texture=image_texture
+	)
 
 	for scene_layer in scene.camap_layers:
 		if scene_layer.layer_id == layer_id:
@@ -352,6 +388,7 @@ class CAMAP_PG_LayerItem(PropertyGroup):
 	layer_name: bpy.props.StringProperty(name="layer", description="Layer name")
 	file_id: bpy.props.IntProperty(name="file_id", description="File index")
 	layer_id: bpy.props.IntProperty(name="layer_id", description="Layer index")
+	psd_layer_id: bpy.props.IntProperty(name="psd_layer_id", description="PSD layer index")
 	layer_object: bpy.props.PointerProperty(name="layer_object", description="Layer object", type=bpy.types.Object)
 	layer_distance: bpy.props.FloatProperty(name="layer_distance", description="Layer distance from camera", subtype="FACTOR", default=1.0, min=0.0, max=1.0)
 	floor: bpy.props.BoolProperty(name="floor", description="Layer floored")
@@ -392,7 +429,7 @@ class CAMAP_UL_LayersList(UIList):
 			op_floor.item_index = index
 
 			row = layout.row(align=True)
-			op_load_layer = row.operator("camap.load_psd_layer", icon="FILE_REFRESH", emboss=False)
+			op_load_layer = row.operator("camap.load_layer", icon="FILE_REFRESH", emboss=False)
 			op_load_layer.item_index = index
 			row.enabled = create_planes_poll(context)
 
@@ -427,8 +464,8 @@ class CAMAP_PT_FilesPanel(Panel):
 
 		col = row.column(align=True)
 
-		col.operator("camap.image_add", icon="ADD", text="")
-		col.operator("camap.image_remove", icon="REMOVE", text="")
+		col.operator("camap.file_add", icon="ADD", text="")
+		col.operator("camap.file_remove", icon="REMOVE", text="")
 
 		if len(scene.camap_files) > 0:
 			row = layout.row()
@@ -452,12 +489,12 @@ class CAMAP_PT_LayersPanel(Panel):
 		layout = self.layout
 
 		row = layout.row()
-		row.prop(context.scene, "psd_camera")
+		row.prop(context.scene, "camap_camera")
 
 		row = layout.row(align=True)
 		row.use_property_decorate = False
-		row.prop(context.scene, "psd_cam_distance_min")
-		row.prop(context.scene, "psd_cam_distance_max")
+		row.prop(context.scene, "camap_cam_distance_min")
+		row.prop(context.scene, "camap_cam_distance_max")
 
 		row = layout.row()
 		row.template_list(
@@ -466,14 +503,14 @@ class CAMAP_PT_LayersPanel(Panel):
 			dataptr=scene,
 			propname="camap_layers",
 			active_dataptr=scene,
-			active_propname="psd_layer_index",
+			active_propname="camap_layer_index",
 			sort_reverse=True,
 			sort_lock=True
 		)
 
 		if len(scene.camap_layers) > 0:
 			row = layout.row()
-			selected_layer = scene.camap_layers[scene.psd_layer_index]
+			selected_layer = scene.camap_layers[scene.camap_layer_index]
 			if selected_layer.floor:
 				prop_offset = row.prop(selected_layer, "floor_offset", text="Floor Offset")
 			else:
@@ -486,10 +523,10 @@ class CAMAP_PT_LayersPanel(Panel):
 		row.operator("camap.apply_position")
 
 
-class CAMAP_OT_ImageAdd(Operator):
-	bl_idname = "camap.image_add"
+class CAMAP_OT_FileAdd(Operator):
+	bl_idname = "camap.file_add"
 	bl_label = ""
-	bl_description = "Add image"
+	bl_description = "Add image file"
 
 	def execute(self, context):
 		scene = context.scene
@@ -499,19 +536,21 @@ class CAMAP_OT_ImageAdd(Operator):
 		return {"FINISHED"}
 
 
-class CAMAP_OT_ImageRemove(Operator):
-	bl_idname = "camap.image_remove"
+class CAMAP_OT_FileRemove(Operator):
+	bl_idname = "camap.file_remove"
 	bl_label = ""
-	bl_description = "Remove image"
+	bl_description = "Remove image file"
 
 	def execute(self, context):
-		print("Remove image")
+		scene = context.scene
+		remove_file_layers(scene.camap_file_index)
+		scene.camap_files.remove(scene.camap_file_index)
 
 		return {"FINISHED"}
 
 
 class CAMAP_OT_LoadPSDLayer(Operator):
-	bl_idname = "camap.load_psd_layer"
+	bl_idname = "camap.load_layer"
 	bl_label = ""
 	bl_description = "Creates/Updates layer object"
 
@@ -522,16 +561,16 @@ class CAMAP_OT_LoadPSDLayer(Operator):
 		selected_layer_id = scene.camap_layers[self.item_index].layer_id
 		file_id = scene.camap_layers[self.item_index].file_id
 
-		psd = psd_tools.PSDImage.open(context.scene.camap_files[file_id].image_path)
+		psd = psd_tools.PSDImage.open(scene.camap_files[file_id].image_path)
 
-		bpy.context.scene.render.resolution_x = psd.size[0]
-		bpy.context.scene.render.resolution_y = psd.size[1]
+		scene.render.resolution_x = psd.size[0]
+		scene.render.resolution_y = psd.size[1]
 
 		i = 0
 		for layer_id, layer in enumerate(psd.descendants()):
 			if layer.kind == "pixel":
 				if layer_id == selected_layer_id:
-					load_layer(scene=scene, image_file=psd, layer=layer, layer_id=layer_id, index=i)
+					load_psd_layer(scene=scene, image_file=psd, layer=layer, layer_id=layer_id, index=i)
 					break
 
 				i += 1
@@ -555,7 +594,7 @@ class CAMAP_OT_ToggleFloor(Operator):
 
 		layer.floor = not layer.floor
 
-		bpy.ops.camap.load_psd_layer(item_index=self.item_index)
+		bpy.ops.camap.load_layer(item_index=self.item_index)
 
 		return {"FINISHED"}
 
@@ -582,7 +621,7 @@ class CAMAP_OT_SelectLayerObject(Operator):
 		return {"FINISHED"}
 
 
-class CAMAP_OT_ReadPSDFile(Operator):
+class CAMAP_OT_ReadCamapFile(Operator):
 	bl_idname = "camap.read_camap_file"
 	bl_label = "Load all layers"
 	bl_description = "Creates all layer objects"
@@ -597,17 +636,53 @@ class CAMAP_OT_ReadPSDFile(Operator):
 		scene = context.scene
 
 		file_id = scene.camap_layers[self.item_index].file_id
-		psd = psd_tools.PSDImage.open(context.scene.camap_files[file_id].image_path)
+		selected_image_path = Path(scene.camap_files[file_id].image_path)
+		layer_items_list = get_layer_items_from_file(file_id)
 
-		bpy.context.scene.render.resolution_x = psd.size[0]
-		bpy.context.scene.render.resolution_y = psd.size[1]
+		if selected_image_path.suffix.lower() == ".psd":
+			psd = psd_tools.PSDImage.open(selected_image_path)
 
-		i = 0
-		for layer_id, layer in enumerate(psd.descendants()):
-			if layer.kind == "pixel":
-				load_layer(scene=scene, image_file=psd, layer=layer, layer_id=layer_id, index=i)
+			scene.render.resolution_x = psd.size[0]
+			scene.render.resolution_y = psd.size[1]
 
-				i += 1
+			descendants_list = list(psd.descendants())
+
+			i = 0
+			for layer_item in layer_items_list:
+				layer = descendants_list[layer_item.psd_layer_id]
+
+				if layer is None:
+					continue
+
+				if layer.kind == "pixel":
+					load_psd_layer(scene=scene, image_file=psd, layer=layer, layer_id=layer_item.layer_id, index=i)
+					i += 1
+
+			# for layer_id, layer in enumerate(psd.descendants()):
+			# 	if layer.kind == "pixel":
+			# 		load_psd_layer(scene=scene, image_file=psd, layer=layer, layer_id=layer_id, index=i)
+
+
+		elif selected_image_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+			if layer_items_list:
+				layer_item = layer_items_list[0]
+
+				image_texture = bpy.data.images.load(selected_image_path.as_posix(), check_existing=True)
+
+				bbox = [0, 0, 1, 1]
+				plane_obj = create_plane(name=layer_item.layer_name, bbox=bbox, camera=scene.camap_camera, distance=0.5)
+
+				create_adaptive_depth_modifier(link_to_object=plane_obj, scene=scene, layer_id=layer_item.layer_id)
+				create_camera_projection_modifier(link_to_object=plane_obj, scene=scene, image_file=None, layer=None)
+
+				create_material(
+					link_to_object=plane_obj,
+					camera_obj=scene.camap_camera,
+					layer_name=layer_item.layer_name,
+					layer_opacity=1.0,
+					image_texture=image_texture
+				)
+
 
 		return {"FINISHED"}
 
@@ -624,7 +699,7 @@ class CAMAP_OT_ApplyPosition(Operator):
 	def execute(self, context):
 		scene = context.scene
 
-		selected_layer = context.scene.camap_layers[context.scene.psd_layer_index]
+		selected_layer = context.scene.camap_layers[context.scene.camap_layer_index]
 		distance = selected_layer.layer_distance
 		layer_object = selected_layer.layer_object
 
@@ -633,7 +708,7 @@ class CAMAP_OT_ApplyPosition(Operator):
 			apply_modifier(target_object=layer_object, modifier=depth_mod)
 
 		selected_layer.layer_distance = distance
-		create_adaptive_depth_modifier(link_to_object=layer_object, scene=scene, layer_id=context.scene.psd_layer_index)
+		create_adaptive_depth_modifier(link_to_object=layer_object, scene=scene, layer_id=context.scene.camap_layer_index)
 
 		return {"FINISHED"}
 
@@ -650,7 +725,7 @@ class CAMAP_OT_ApplyPosition(Operator):
 # 	def execute(self, context):
 # 		scene = context.scene
 
-# 		layer_object = context.scene.camap_layers[context.scene.psd_layer_index].layer_object
+# 		layer_object = context.scene.camap_layers[context.scene.camap_layer_index].layer_object
 
 # 		depth_mod = layer_object.modifiers.get("AdaptiveDepth")
 # 		if depth_mod is not None:
@@ -663,7 +738,7 @@ class CAMAP_OT_ApplyPosition(Operator):
 # 		))
 # 		layer_mesh = layer_object.data
 
-# 		camera_obj = context.scene.psd_camera
+# 		camera_obj = context.scene.camap_camera
 # 		camera_pos = Vector((
 # 			camera_obj.matrix_world[0][3],
 # 			camera_obj.matrix_world[1][3],
@@ -697,12 +772,12 @@ classes = (
 	CAMAP_UL_LayersList,
 	CAMAP_PG_FileItem,
 	CAMAP_PG_LayerItem,
-	CAMAP_OT_ImageAdd,
-	CAMAP_OT_ImageRemove,
+	CAMAP_OT_FileAdd,
+	CAMAP_OT_FileRemove,
 	CAMAP_OT_LoadPSDLayer,
 	CAMAP_OT_ToggleFloor,
 	CAMAP_OT_SelectLayerObject,
-	CAMAP_OT_ReadPSDFile,
+	CAMAP_OT_ReadCamapFile,
 	CAMAP_OT_ApplyPosition,
 	# CAMAP_OT_FloorLayer,
 	CAMAP_PT_FilesPanel,
@@ -721,21 +796,21 @@ def register():
 	bpy.types.Scene.camap_file_index = IntProperty(name="File Index", description="File index", default=0)
 
 	bpy.types.Scene.camap_layers = CollectionProperty(type=CAMAP_PG_LayerItem)
-	bpy.types.Scene.psd_layer_count = IntProperty(name="PSD Layer Count", description="Number of layer in PSD file", default=0)
-	bpy.types.Scene.psd_layer_index = IntProperty(name="Layer Index", description="Layer index", default=0)
-	bpy.types.Scene.psd_camera = PointerProperty(name="Projection Camera", description="Camera from which to project", type=bpy.types.Object, poll=camera_object_poll)
-	bpy.types.Scene.psd_cam_distance_min = FloatProperty(name="Camera Distance Min", description="Camera distance min", subtype="DISTANCE", default=3.0)
-	bpy.types.Scene.psd_cam_distance_max = FloatProperty(name="Camera Distance Max", description="Camera distance max", subtype="DISTANCE", default=10.0)
+	bpy.types.Scene.camap_layer_count = IntProperty(name="PSD Layer Count", description="Number of layer in PSD file", default=0)
+	bpy.types.Scene.camap_layer_index = IntProperty(name="Layer Index", description="Layer index", default=0)
+	bpy.types.Scene.camap_camera = PointerProperty(name="Projection Camera", description="Camera from which to project", type=bpy.types.Object, poll=camera_object_poll)
+	bpy.types.Scene.camap_cam_distance_min = FloatProperty(name="Camera Distance Min", description="Camera distance min", subtype="DISTANCE", default=3.0)
+	bpy.types.Scene.camap_cam_distance_max = FloatProperty(name="Camera Distance Max", description="Camera distance max", subtype="DISTANCE", default=10.0)
 
 
 def unregister():
 	from bpy.utils import unregister_class
 
-	del bpy.types.Scene.psd_cam_distance_max
-	del bpy.types.Scene.psd_cam_distance_min
-	del bpy.types.Scene.psd_camera
-	del bpy.types.Scene.psd_layer_index
-	del bpy.types.Scene.psd_layer_count
+	del bpy.types.Scene.camap_cam_distance_max
+	del bpy.types.Scene.camap_cam_distance_min
+	del bpy.types.Scene.camap_camera
+	del bpy.types.Scene.camap_layer_index
+	del bpy.types.Scene.camap_layer_count
 	del bpy.types.Scene.camap_layers
 	del bpy.types.Scene.camap_file_index
 	# del bpy.types.Scene.camap_file
