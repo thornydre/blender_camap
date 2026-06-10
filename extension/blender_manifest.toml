@@ -1,0 +1,23 @@
+schema_version = "1.0.0"
+
+id = "psd_layers_reader"
+version = "1.0.0"
+name = "PSD Layers Reader"
+tagline = "Import PSD layers"
+maintainer = "Lucas Boutrot <lucas.boutrot@gmail.com>"
+
+type = "add-on"
+tags = ["Render"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+copyright = ["2026 Lucas Boutrot"]
+
+wheels = [
+	"./wheels/attrs-25.4.0-py3-none-any.whl",
+	"./wheels/numpy-2.4.2-cp313-cp313-win_amd64.whl",
+	"./wheels/pillow-12.1.0-cp313-cp313-win_amd64.whl",
+	"./wheels/psd_tools-1.12.1-cp313-cp313-win_amd64.whl"
+]
