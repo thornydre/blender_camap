@@ -14,6 +14,8 @@ from PIL import Image
 def camera_object_poll(self, object):
 	return object.type == "CAMERA"
 
+def load_layers_poll(context):
+	return create_planes_poll(context) and len(context.scene.camap_layers) > 0
 
 def create_planes_poll(context):
 	# ext = os.path.splitext(context.scene.camap_file)[1]
@@ -45,15 +47,16 @@ def load_new_camap_file(self, context):
 	# scene.camap_layers.clear()
 
 	# Change name in the image list
-	selected_image_path_str = scene.camap_files[scene.camap_file_index].image_path
+	selected_file = scene.camap_files[scene.camap_file_index]
+	selected_image_path_str = selected_file.image_path
 	if not selected_image_path_str:
-		scene.camap_files[scene.camap_file_index].file_name = "New File"
+		selected_file.file_name = "New File"
 		return
 
-	remove_file_layers(scene.camap_file_index)
+	remove_file_layers(selected_file)
 
 	selected_image_path = Path(selected_image_path_str)
-	scene.camap_files[scene.camap_file_index].file_name = selected_image_path.stem
+	selected_file.file_name = selected_image_path.stem
 
 	if selected_image_path.suffix.lower() == ".psd":
 		# Add layers in layers list
@@ -66,7 +69,7 @@ def load_new_camap_file(self, context):
 			if layer.kind == "pixel":
 				item = scene.camap_layers.add()
 				item.layer_name = layer.name
-				item.file_id = scene.camap_file_index
+				item.file = selected_file
 				item.layer_id = len(scene.camap_layers) + layer_id
 				item.psd_layer_id = layer_id
 				item.layer_object = None
@@ -78,7 +81,7 @@ def load_new_camap_file(self, context):
 	elif selected_image_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
 		item = scene.camap_layers.add()
 		item.layer_name = selected_image_path.stem
-		item.file_id = scene.camap_file_index
+		item.file = selected_file
 		item.layer_id = len(scene.camap_layers)
 		item.psd_layer_id = -1
 		item.layer_object = None
@@ -86,22 +89,22 @@ def load_new_camap_file(self, context):
 		item.layer_visibility = True
 
 
-def remove_file_layers(file_id):
+def remove_file_layers(file):
 	scene = bpy.context.scene
 	remove_ids_list = []
 	for i, layer in enumerate(scene.camap_layers):
-		if layer.file_id == file_id:
+		if layer.file == file:
 			remove_ids_list.append(i)
 
 	for layer_id in sorted(remove_ids_list, reverse=True):
 		scene.camap_layers.remove(layer_id)
 
 
-def get_layer_items_from_file(file_id):
+def get_layers_from_file(file):
 	scene = bpy.context.scene
 	layers_list = []
 	for layer_item in scene.camap_layers:
-		if layer_item.file_id == file_id:
+		if layer_item.file == file:
 			layers_list.append(layer_item)
 
 	return layers_list
@@ -386,7 +389,7 @@ class CAMAP_PG_FileItem(PropertyGroup):
 
 class CAMAP_PG_LayerItem(PropertyGroup):
 	layer_name: bpy.props.StringProperty(name="layer", description="Layer name")
-	file_id: bpy.props.IntProperty(name="file_id", description="File index")
+	file: bpy.props.PointerProperty(type=CAMAP_PG_FileItem, name="file", description="File property group")
 	layer_id: bpy.props.IntProperty(name="layer_id", description="Layer index")
 	psd_layer_id: bpy.props.IntProperty(name="psd_layer_id", description="PSD layer index")
 	layer_object: bpy.props.PointerProperty(name="layer_object", description="Layer object", type=bpy.types.Object)
@@ -411,8 +414,13 @@ class CAMAP_UL_LayersList(UIList):
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index, flt_flag):
 		# custom_icon = "OBJECT_DATAMODE"
 		if self.layout_type in {"DEFAULT", "COMPACT"}:
+			scene = context.scene
+
 			row = layout.row(align=True)
-			row.label(text=item.layer_name, icon="DOT" if context.scene.camap_file_index == item.file_id else "BLANK1")
+			camap_files_bool = len(scene.camap_files) > 0
+			if camap_files_bool:
+				camap_files_bool = scene.camap_files[scene.camap_file_index] == item.file
+			row.label(text=item.layer_name, icon="DOT" if camap_files_bool else "BLANK1")
 
 			row = layout.row(align=True)
 			if item.floor:
@@ -517,7 +525,7 @@ class CAMAP_PT_LayersPanel(Panel):
 				prop_distance = row.prop(selected_layer, "layer_distance", text="Layer Distance")
 
 		row = layout.row()
-		row.operator("camap.read_camap_file")
+		row.operator("camap.load_camap_layers")
 
 		row = layout.row()
 		row.operator("camap.apply_position")
@@ -532,6 +540,8 @@ class CAMAP_OT_FileAdd(Operator):
 		scene = context.scene
 		item = scene.camap_files.add()
 		item.file_name = "New File"
+
+		scene.camap_file_index = len(scene.camap_files) - 1
 		
 		return {"FINISHED"}
 
@@ -541,10 +551,17 @@ class CAMAP_OT_FileRemove(Operator):
 	bl_label = ""
 	bl_description = "Remove image file"
 
+	@classmethod
+	def poll(cls, context):
+		return len(context.scene.camap_files) > 0
+
 	def execute(self, context):
 		scene = context.scene
-		remove_file_layers(scene.camap_file_index)
+		selected_file = scene.camap_files[scene.camap_file_index]
+		remove_file_layers(selected_file)
 		scene.camap_files.remove(scene.camap_file_index)
+
+		scene.camap_file_index = max(0, scene.camap_file_index - 1)
 
 		return {"FINISHED"}
 
@@ -621,8 +638,8 @@ class CAMAP_OT_SelectLayerObject(Operator):
 		return {"FINISHED"}
 
 
-class CAMAP_OT_ReadCamapFile(Operator):
-	bl_idname = "camap.read_camap_file"
+class CAMAP_OT_LoadCamapLayers(Operator):
+	bl_idname = "camap.load_camap_layers"
 	bl_label = "Load all layers"
 	bl_description = "Creates all layer objects"
 
@@ -630,14 +647,15 @@ class CAMAP_OT_ReadCamapFile(Operator):
 
 	@classmethod
 	def poll(cls, context):
-		return create_planes_poll(context)
+		return load_layers_poll(context)
 
 	def execute(self, context):
 		scene = context.scene
 
-		file_id = scene.camap_layers[self.item_index].file_id
-		selected_image_path = Path(scene.camap_files[file_id].image_path)
-		layer_items_list = get_layer_items_from_file(file_id)
+		# for camap_file in scene.camap_files.values():
+		# file_id = scene.camap_layers[self.item_index].file_id
+		selected_image_path = Path(camap_file.image_path)
+		layer_items_list = get_layers_from_file(camap_file.file_id)
 
 		if selected_image_path.suffix.lower() == ".psd":
 			psd = psd_tools.PSDImage.open(selected_image_path)
@@ -777,7 +795,7 @@ classes = (
 	CAMAP_OT_LoadPSDLayer,
 	CAMAP_OT_ToggleFloor,
 	CAMAP_OT_SelectLayerObject,
-	CAMAP_OT_ReadCamapFile,
+	CAMAP_OT_LoadCamapLayers,
 	CAMAP_OT_ApplyPosition,
 	# CAMAP_OT_FloorLayer,
 	CAMAP_PT_FilesPanel,
