@@ -372,9 +372,9 @@ def load_psd_layer(scene, image_file, layer, layer_id, index):
 		image_texture=image_texture
 	)
 
-	for scene_layer in scene.camap_layers:
-		if scene_layer.layer_id == layer_id:
-			scene_layer.layer_object = plane_obj
+	for camap_layer in scene.camap_layers:
+		if camap_layer.layer_id == layer_id:
+			camap_layer.layer_object = plane_obj
 
 
 def get_addon_directory():
@@ -731,60 +731,6 @@ class CAMAP_OT_ApplyPosition(Operator):
 		return {"FINISHED"}
 
 
-# class CAMAP_OT_FloorLayer(Operator):
-# 	bl_idname = "camap.floor_layer"
-# 	bl_label = "Floor selected layer"
-# 	bl_description = "Project selected layer on the floor"
-
-# 	@classmethod
-# 	def poll(cls, context):
-# 		return create_planes_poll(context)
-
-# 	def execute(self, context):
-# 		scene = context.scene
-
-# 		layer_object = context.scene.camap_layers[context.scene.camap_layer_index].layer_object
-
-# 		depth_mod = layer_object.modifiers.get("AdaptiveDepth")
-# 		if depth_mod is not None:
-# 			apply_modifier(target_object=layer_object, modifier=depth_mod)
-
-# 		layer_pos = Vector((
-# 			layer_object.matrix_world[0][3],
-# 			layer_object.matrix_world[1][3],
-# 			layer_object.matrix_world[2][3]
-# 		))
-# 		layer_mesh = layer_object.data
-
-# 		camera_obj = context.scene.camap_camera
-# 		camera_pos = Vector((
-# 			camera_obj.matrix_world[0][3],
-# 			camera_obj.matrix_world[1][3],
-# 			camera_obj.matrix_world[2][3]
-# 		))
-
-# 		for vert in layer_mesh.vertices:
-# 			vert_world_pos = layer_pos + vert.co
-# 			proj_pos = self.project_to_floor(camera_pos, vert_world_pos - camera_pos)
-# 			vert.co = proj_pos - layer_pos
-
-# 		return {"FINISHED"}
-
-# 	def project_to_floor(self, point, direction):
-# 		if direction[2] == 0:
-# 			return None
-
-# 		t = - point[2] / direction[2]
-
-# 		proj = Vector((
-# 			point[0] + t * direction[0],
-# 			point[1] + t * direction[1],
-# 			0
-# 		))
-
-# 		return proj
-
-
 classes = (
 	CAMAP_UL_FilesList,
 	CAMAP_UL_LayersList,
@@ -797,7 +743,6 @@ classes = (
 	CAMAP_OT_SelectLayerObject,
 	CAMAP_OT_LoadCamapLayers,
 	CAMAP_OT_ApplyPosition,
-	# CAMAP_OT_FloorLayer,
 	CAMAP_PT_FilesPanel,
 	CAMAP_PT_LayersPanel
 )
@@ -810,7 +755,6 @@ def register():
 		register_class(cls)
 
 	bpy.types.Scene.camap_files = CollectionProperty(type=CAMAP_PG_FileItem)
-	# bpy.types.Scene.camap_file = StringProperty(name="PSD File", subtype="FILE_PATH", description="Path to PSD file", default="", update=load_new_camap_file)
 	bpy.types.Scene.camap_file_index = IntProperty(name="File Index", description="File index", default=0)
 
 	bpy.types.Scene.camap_layers = CollectionProperty(type=CAMAP_PG_LayerItem)
@@ -831,7 +775,6 @@ def unregister():
 	del bpy.types.Scene.camap_layer_count
 	del bpy.types.Scene.camap_layers
 	del bpy.types.Scene.camap_file_index
-	# del bpy.types.Scene.camap_file
 	del bpy.types.Scene.camap_files
 
 	for cls in reversed(classes):
